@@ -1,0 +1,46 @@
+{
+  // Vi baserer os stadig på rush-stack-kompilatoren for SPFx 1.21.1
+  "extends": "./node_modules/@microsoft/rush-stack-compiler-5.3/includes/tsconfig-web.json",
+  "compilerOptions": {
+    // Se forklaring nedenfor:
+    "target": "es2015",
+    "lib": [
+      "es2015",
+      "es2017",
+      "dom"
+    ],
+    "module": "esnext",
+    "moduleResolution": "node",
+    "jsx": "react",
+    "declaration": true,
+    "sourceMap": true,
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    "outDir": "lib",
+    "inlineSources": false,
+    "noImplicitAny": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Type-root for node_modules/@types og @microsoft/… 
+    "typeRoots": [
+      "./node_modules/@types",
+      "./node_modules/@microsoft"
+    ],
+    "types": [
+      "webpack-env"
+    ],
+
+    // Sørg for at vi kan importere "*.module.scss" som moduler:
+    // (der er ingen speciel CSS-loader-opsætning i tsconfig, 
+    // men vi skal alligevel fortælle TS, at disse filer findes)
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    // Indsæt alle .d.ts-filer – vi skal lave en dertil 
+    // der deklarerer modules for scss:
+    "src/**/*.d.ts"
+  ]
+}

@@ -1,0 +1,125 @@
+/* src/webparts/myShifts/components/WeekCalendar.module.scss */
+
+.weekCalendarContainer {
+  width: 100%;
+  padding: 16px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.navButton {
+  background: none;
+  border: 1px solid #888;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 2px;
+  font-size: 1rem;
+  &:hover {
+    background-color: #f4f4f4;
+  }
+}
+
+.emptyWeekMessage {
+  margin-top: 20px;
+  font-style: italic;
+  text-align: center;
+}
+
+.gridContainer {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.headerRow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-weight: bold;
+  border-bottom: 1px solid #ccc;
+  margin-bottom: 4px;
+}
+
+.headerCell {
+  padding: 4px 2px;
+  background: #f3f2f1;
+}
+
+.bodyRow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  height: 600px; /* Juster efter ønske */
+  position: relative;
+}
+
+.dayColumn {
+  position: relative;
+  border-left: 1px solid #eee;
+  background-color: #fafafa;
+  overflow: hidden;
+}
+
+/* Almindelige vagt-blokke */
+.shiftBlock {
+  position: absolute;
+  border-radius: 4px;
+  padding: 2px 4px;
+  color: white;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid;
+}
+
+/* Ledige vagt-blokke */
+.openShiftBlock {
+  position: absolute;
+  border-radius: 4px;
+  padding: 2px 4px;
+  color: #0078D4;
+  box-sizing: border-box;
+  background-color: rgba(0, 120, 212, 0.1);
+  border: 1px dashed #0078D4;
+  overflow: hidden;
+}
+
+/* Indhold inde i en vagt */
+.shiftContent {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+}
+
+/* Advarsels-ikon (overlappende vagter) */
+.warningIcon {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  color: red;
+  font-size: 1rem;
+}
+
+/* Baggrunds “time‐linjer” i hver dag */
+.hourLinesContainer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.hourLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: #e1e1e1;
+}
+
+.hourLabel {
+  position: absolute;
+  top: -0.6rem;
+  left: 2px;
+  font-size: 0.6rem;
+  color: #666;
+}

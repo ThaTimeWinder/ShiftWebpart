@@ -1,0 +1,43 @@
+  {
+    "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/package-solution.schema.json",
+    "solution": {
+      "name": "shifts-client-side-solution",
+      "id": "d145ee3e-7f22-4e16-a7a7-8b31ccd5c58a",
+      "version": "1.0.0.0",
+      "includeClientSideAssets": true,
+      "skipFeatureDeployment": true,
+      "isDomainIsolated": false,
+      "webApiPermissionRequests": [
+        { "resource": "Microsoft Graph", "scope": "Schedule.Read.All" }
+      ],
+      "developer": {
+        "name": "",
+        "websiteUrl": "",
+        "privacyUrl": "",
+        "termsOfUseUrl": "",
+        "mpnId": "Undefined-1.21.1"
+      },
+      "metadata": {
+        "shortDescription": {
+          "default": "shifts description"
+        },
+        "longDescription": {
+          "default": "shifts description"
+        },
+        "screenshotPaths": [],
+        "videoUrl": "",
+        "categories": []
+      },
+      "features": [
+        {
+          "title": "shifts Feature",
+          "description": "The feature that activates elements of the shifts solution.",
+          "id": "515c2414-48e8-435c-a80d-5ff8b5d439ce",
+          "version": "1.0.0.0"
+        }
+      ]
+    },
+    "paths": {
+      "zippedPackage": "solution/shifts.sppkg"
+    }
+  }

@@ -1,0 +1,118 @@
+/* MyShiftsCalendar.module.scss */
+
+/* ───────────────────────────────────────────────────────────────────────────── */
+/* 1. Outer container for the entire calendar view                              */
+/* ───────────────────────────────────────────────────────────────────────────── */
+.container {
+  padding: 1rem;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────── */
+/* 2. Navigation buttons and date header                                          */
+/* ───────────────────────────────────────────────────────────────────────────── */
+.navButton {
+  background-color: #0078d4;
+  color: #ffffff;
+  border: none;
+  border-radius: 2px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  min-width: 2.25rem;
+}
+.navButton:hover {
+  background-color: #005a9e;
+}
+
+.dateText {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333333;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────── */
+/* 3. Loading, error, and empty states                                             */
+/* ───────────────────────────────────────────────────────────────────────────── */
+.loadingText {
+  color: #666666;
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}
+
+.errorText {
+  color: #d62e2e;
+  font-size: 0.9rem;
+  margin-top: 1rem;
+  display: inline-block;
+}
+
+.emptyText {
+  color: #0078d4;
+  font-size: 0.95rem;
+  margin-top: 1rem;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────── */
+/* 4. Each shift‐row (real vs. open)                                               */
+/* ───────────────────────────────────────────────────────────────────────────── */
+.realShiftRow,
+.openShiftRow {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e1e1e1;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────── */
+/* 5. Time‐range text inside a shift‐row                                           */
+/* ───────────────────────────────────────────────────────────────────────────── */
+.timeText {
+  font-size: 0.9rem;
+  font-weight: 500;
+  width: 5.5rem; /* enough space for “HH:mm – HH:mm” */
+  color: #333333;
+}
+
+.openTimeText {
+  font-size: 0.9rem;
+  font-weight: 500;
+  width: 5.5rem;
+  color: #0078d4; /* blue for open shifts */
+}
+
+/* ───────────────────────────────────────────────────────────────────────────── */
+/* 6. Details container (team + group or open icon/text)                            */
+/* ───────────────────────────────────────────────────────────────────────────── */
+.details {
+  display: flex;
+  align-items: center;
+  font-size: 0.85rem;
+  color: #444444;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────── */
+/* 7. Icon for open shifts (Clock icon)                                             */
+/* ───────────────────────────────────────────────────────────────────────────── */
+.openIcon {
+  font-size: 1.2rem;
+  margin-right: 0.5rem;
+  color: #0078d4;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────── */
+/* 8. Text label next to open icon (e.g. “Ledig vagt”)                               */
+/* ───────────────────────────────────────────────────────────────────────────── */
+.openText {
+  color: #0078d4;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.errorText {
+  display: inline-block;
+  color: #d62e2e;
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}

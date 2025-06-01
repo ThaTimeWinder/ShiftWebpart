@@ -1,0 +1,143 @@
+/* WeekCalendar.module.scss */
+
+/* 1. The outer wrapper for the entire week‐view component */
+.weekContainer {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background-color: #ffffff;
+  border: 1px solid #e1e1e1;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* 2. A status message at the top when loading or showing errors */
+.status {
+  font-size: 14px;
+  padding: 12px;
+  color: #333333;
+}
+
+/* 3. An error message style (if you ever need to display an error) */
+.error {
+  font-size: 14px;
+  padding: 12px;
+  color: #a80000;
+  background-color: #fde7e9;
+  border: 1px solid #e0182d;
+  border-radius: 4px;
+}
+
+/* 4. The grid “canvas” where all 7 days × 24 hours are displayed */
+.gridContainer {
+  display: grid;
+  grid-template-columns: 80px repeat(7, 1fr);
+  grid-auto-rows: 40px; /* each hour slot is 40px tall */
+  border-top: 1px solid #e1e1e1;
+  border-left: 1px solid #e1e1e1;
+  margin-top: 16px;
+}
+
+/* 5. The header row showing each day’s name (Sun/Mon/Tue/…) */
+.dayHeader {
+  background-color: #f3f2f1;
+  color: #323130;
+  font-weight: 600;
+  text-align: center;
+  border-right: 1px solid #e1e1e1;
+  border-bottom: 1px solid #e1e1e1;
+  line-height: 40px; /* vertically center text */
+  padding: 0 4px;
+}
+
+/* 6. The very first column (leftmost) reserved for hour labels */
+.hourGrid {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e1e1e1;
+}
+
+/* 7. Each row in the leftmost “hour column” */
+.hourRow {
+  height: 40px;
+  border-bottom: 1px solid #e1e1e1;
+}
+
+/* 8. The actual text (e.g. “00:00”, “01:00”, …) inside hourRow */
+.hourLabel {
+  font-size: 12px;
+  color: #605e5c;
+  line-height: 40px;
+  text-align: right;
+  padding-right: 8px;
+}
+
+/* 9. Each “day column” cell within the main grid (empty background) */
+.column {
+  border-right: 1px solid #e1e1e1;
+  border-bottom: 1px solid #e1e1e1;
+  position: relative; /* for absolutely‐positioning shift blocks */
+  background-color: #ffffff;
+}
+
+/* 10. A single shift block absolutely positioned within its day/rows */
+.shiftBlock {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  border-radius: 4px;
+  padding: 4px 6px;
+  box-sizing: border-box;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.1s ease-in-out;
+}
+
+.shiftBlock:hover {
+  transform: scale(1.02);
+}
+
+/* 11. Within a shift block, a small container wrapping shift details */
+.shiftInfo {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 12. The time range text at the top of a shift block (“08:00–16:00”) */
+.shiftTime {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 16px;
+}
+
+/* 13. The team name (or scheduling‐group) below the time, in a smaller font */
+.shiftTeam {
+  font-size: 11px;
+  color: #f3f2f1;
+  margin-top: 2px;
+}
+
+/* 14. If two shifts overlap, show a small red warning icon in the corner */
+.overlapIcon {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  color: #a80000;
+  font-size: 14px;
+}
+
+/* 15. Example “open shift” styling (transparent outline) */
+.openShift {
+  border: 2px dashed #0078d4;
+  background-color: rgba(0, 120, 212, 0.1);
+  color: #0078d4;
+}
+
+/* 16. Red “no‐shifts” icon or message in the middle */
+.noShiftsIcon {
+  font-size: 24px;
+  color: #605e5c;
+  text-align: center;
+  padding: 24px 0;
+}

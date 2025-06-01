@@ -4,4 +4,5 @@ export interface IMyShiftsProps {
   environmentMessage: string;
   hasTeamsContext: boolean;
   userDisplayName: string;
+  viewMode: 'day' | 'week';
 }

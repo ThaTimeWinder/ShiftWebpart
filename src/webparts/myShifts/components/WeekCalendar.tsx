@@ -1,10 +1,11 @@
 // src/webparts/myShifts/components/WeekCalendar.tsx
 import * as React from 'react';
 import { useEffect, useState } from 'react';
-import { DateTime, Interval } from 'luxon';
+import { DateTime } from 'luxon';
 import { MSGraphClientV3 } from '@microsoft/sp-http';
 import { Icon } from '@fluentui/react';
-import { IShift, getShiftsForDay } from '../services/ShiftsService';
+
+import { getShiftsForDay, IShift } from '../services/ShiftsService';
 import styles from './WeekCalendar.module.scss';
 
 export interface IWeekCalendarProps {
@@ -13,174 +14,226 @@ export interface IWeekCalendarProps {
   tz: string;
 }
 
-interface IDayShifts {
-  date: DateTime;
-  shifts: IShift[];
-}
-
 const HOURS_PER_DAY = 24;
-const MINUTES_PER_DAY = 60 * HOURS_PER_DAY;
+const MINUTES_PER_DAY = 24 * 60;
+
+/**
+ * Returns an array of “column index” for each shift in shiftsForDay,
+ * so that overlapping shifts occupy separate side-by-side columns.
+ */
+function computeOverlapCols(shiftsForDay: IShift[]): number[] {
+  const len = shiftsForDay.length;
+  const cols: number[] = new Array(len).fill(0);
+  let maxCol = 0;
+
+  for (let i = 0; i < len; i++) {
+    const s1 = DateTime.fromISO(shiftsForDay[i].sharedShift.startDateTime);
+    const e1 = DateTime.fromISO(shiftsForDay[i].sharedShift.endDateTime);
+    let col = 0;
+
+    // Compare shift i against all previous shifts to find a free column
+    for (let j = 0; j < i; j++) {
+      const s2 = DateTime.fromISO(shiftsForDay[j].sharedShift.startDateTime);
+      const e2 = DateTime.fromISO(shiftsForDay[j].sharedShift.endDateTime);
+      // Overlap if: start1 < end2 AND start2 < end1
+      const overlaps = s1 < e2 && s2 < e1;
+      if (overlaps && cols[j] === col) {
+        col++;
+        j = -1; // restart inner loop
+      }
+    }
+
+    cols[i] = col;
+    if (col > maxCol) {
+      maxCol = col;
+    }
+  }
+
+  return cols;
+}
 
 const WeekCalendar: React.FC<IWeekCalendarProps> = (props) => {
   const { graphClient, userId, tz } = props;
 
-  // 1️⃣ Find "onsdag" i den uge, brugeren befinder sig i nu:
-  // Luxon regner som standard mandag=startOf('week'), så plus 2 => onsdag.
+  // 1) Determine “start of week” as onsdag (Wednesday) for the current date in the user’s tz:
+  //    Luxon’s startOf('week') returns Monday. Wednesday = Monday + 2 days.
   const today = DateTime.now().setZone(tz);
   const weekStart = today.startOf('week').plus({ days: 2 });
 
-  // 2️⃣ State: en liste af DateTime-objekter for onsdag→onsdag (7 dage)
-  const [days] = useState<DateTime[]>(() =>
-    Array.from({ length: 7 }).map((_, i) => weekStart.plus({ days: i }))
+  // 2) Build an array of the 7 consecutive days (Wed → Wed):
+  const [days] = useState<DateTime[]>(
+    Array.from({ length: 7 }).map((_, idx) => weekStart.plus({ days: idx }))
   );
 
-  // 3️⃣ State: gem IDayShifts for hver dag
-  const [daysShifts, setDaysShifts] = useState<IDayShifts[]>([]);
+  // 3) daysShifts: for each day we’ll store { date: DateTime, shifts: IShift[] }:
+  const [daysShifts, setDaysShifts] = useState<
+    { date: DateTime; shifts: IShift[] }[]
+  >([]);
 
-  // 4️⃣ Når komponenten mountes, eller når "days" ændres,
-  //    hent vagter for hver dag parallelt:
+  // 4) status flags:
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // 5) Whenever the component mounts, fetch shifts for each of the seven days:
   useEffect(() => {
-    const loadAllDays = async () => {
-      const all: IDayShifts[] = [];
+    let isCancelled = false; // to avoid state updates if component unmounts
 
-      for (const day of days) {
-        try {
-          const shifts = await getShiftsForDay(graphClient, day, userId);
-          all.push({ date: day, shifts });
-        } catch (e) {
-          console.error(`Fejl ved hentning af shifts for ${day.toISODate()}`, e);
+    async function loadAllWeek() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        // Fire off parallel calls for each day:
+        const allPromises = days.map(async (d) => {
+          const result = await getShiftsForDay(graphClient, d, userId);
+          return { date: d, shifts: result };
+        });
+
+        const results = await Promise.all(allPromises);
+
+        if (!isCancelled) {
+          setDaysShifts(results);
         }
-      }
-
-      setDaysShifts(all);
-    };
-
-    loadAllDays();
-  }, [graphClient, userId, days]);
-
-  // 5️⃣ Hjælpefunktion: Konverter ISO→"HH:mm"
-  const formatHour = (isoString: string): string =>
-    DateTime.fromISO(isoString).setZone(tz).toFormat('HH:mm');
-
-  // 6️⃣ Hjælp til at beregne top/højde i % for en vagt (0–100% af dag)
-  const minutesOfDay = (dt: DateTime) => dt.hour * 60 + dt.minute;
-  const topPercent = (dt: DateTime) => (minutesOfDay(dt) / MINUTES_PER_DAY) * 100;
-  const heightPercent = (start: DateTime, end: DateTime) =>
-    ((minutesOfDay(end) - minutesOfDay(start)) / MINUTES_PER_DAY) * 100;
-
-  // 7️⃣ Overlap‐beregning: find kolonneindex pr. vagt (N²‐algoritme, simpel)
-  function computeOverlapCols(shiftsForDay: IShift[]): number[] {
-    const n = shiftsForDay.length;
-    const cols: number[] = new Array(n).fill(0);
-    let maxCol = 0;
-
-    for (let i = 0; i < n; i++) {
-      const sI = shiftsForDay[i];
-      const startI = DateTime.fromISO(sI.sharedShift.startDateTime).setZone(tz);
-      const endI = DateTime.fromISO(sI.sharedShift.endDateTime).setZone(tz);
-      let col = 0;
-
-      for (let j = 0; j < i; j++) {
-        const sJ = shiftsForDay[j];
-        const startJ = DateTime.fromISO(sJ.sharedShift.startDateTime).setZone(tz);
-        const endJ = DateTime.fromISO(sJ.sharedShift.endDateTime).setZone(tz);
-        const intervalI = Interval.fromDateTimes(startI, endI);
-        const intervalJ = Interval.fromDateTimes(startJ, endJ);
-
-        if (intervalI.overlaps(intervalJ)) {
-          // hvis overlappende, så gem en kolonne-værdi > j’s kolonne
-          col = Math.max(col, cols[j] + 1);
+      } catch (e) {
+        if (!isCancelled) {
+          const msg = e instanceof Error ? e.message : String(e);
+          setError(msg);
         }
-      }
-      cols[i] = col;
-      if (col > maxCol) {
-        maxCol = col;
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
     }
 
-    return cols;
-  }
+    loadAllWeek();
 
-  // 8️⃣ Render metrik, hvis der IKKE er nogen vagter for hele ugen
-  if (daysShifts.length === 0) {
+    return () => {
+      isCancelled = true;
+    };
+  }, [days, graphClient, userId]);
+
+ 
+  // 7) If still loading:
+  if (loading) {
     return <div className={styles.status}>Indlæser vagter…</div>;
   }
 
-  // 9️⃣ Hvis alle dage har tom array, vis "Ingen vagter"
-  const allEmpty = daysShifts.every((ds) => ds.shifts.length === 0);
-  if (allEmpty) {
-    return <div className={styles.status}>Ingen vagter i hele ugen 🎉</div>;
+  // 8) If error:
+  if (error) {
+    return <div className={styles.error}>Fejl under indlæsning: {error}</div>;
   }
 
+  // 9) If all days have zero shifts, show a “no shifts this week” message:
+  const allEmpty = daysShifts.every((ds) => ds.shifts.length === 0);
+  if (allEmpty) {
+    return (
+      <div className={styles.status}>
+        Ingen vagter i denne uge 🎉
+      </div>
+    );
+  }
+
+  // 10) Otherwise, render the full 7×24 grid plus the shift‐blocks:
   return (
     <div className={styles.weekContainer}>
-      {/* 10️⃣ GridContainer: 1 kolonne til timeLabels + 7 kolonner til hver dag */}
-      <div className={styles.gridContainer}>
-        {/* 11️⃣ Venstre kolonne: timeLabels */}
-        <div className={styles.hourGrid}>
-          {Array.from({ length: HOURS_PER_DAY }).map((_, hour) => (
-            <div key={hour} className={styles.hourRow}>
-              <div className={styles.hourLabel}>
-                {hour.toString().padStart(2, '0')}:00
-              </div>
+      {/* --- Header Row: blank corner + each day’s name/date --- */}
+      <div className={styles.headerRow}>
+        <div className={styles.hourHeader} />
+        {days.map((dayDt) => (
+          <div key={dayDt.toISODate()} className={styles.dayHeader}>
+            {dayDt.toFormat('ccc, dd LLL yyyy')}
+          </div>
+        ))}
+      </div>
+
+      {/* --- Hour‐Grid: 24 rows of 7 day‐columns --- */}
+      <div className={styles.hourGrid}>
+        {Array.from({ length: HOURS_PER_DAY }).map((_, hour) => (
+          <div key={hour} className={styles.hourRow}>
+            {/* Leftmost hour label */}
+            <div className={styles.hourLabel}>
+              {DateTime.fromObject({ hour }).toFormat('HH:mm')}
             </div>
-          ))}
-        </div>
 
-        {/* 12️⃣ Hver enkelt kolonne (én pr. dag) */}
-        {daysShifts.map((dayShift, dayIdx) => {
-          const day = dayShift.date;
-          const shifts = dayShift.shifts;
-          const overlapCols = computeOverlapCols(shifts);
+            {/* 7 empty day‐cells (we’ll absolutely‐position shift‐blocks on top) */}
+            {days.map((_, dayIndex) => (
+              <div key={dayIndex} className={styles.dayColumn} />
+            ))}
+          </div>
+        ))}
 
-          return (
-            <div key={day.toISODate()} className={styles.column}>
-              {/* Dags-header (f.eks. "onsdag 04 juni") */}
-              <div className={styles.dayHeader}>
-                {day.toFormat('ccc dd LLL yyyy')}
+        {/* --- Now overlay all shift blocks for each day: --- */}
+        {daysShifts.map((ds, dayIndex) => {
+          // Compute overlap columns for that day:
+          const cols = computeOverlapCols(ds.shifts);
+          // The total number of overlapping columns on that day = max(cols)+1
+          const maxCols =
+            cols.length > 0 ? Math.max(...cols) + 1 : 1;
+
+          return ds.shifts.map((shift, idx) => {
+            // Convert start/end to user's TZ:
+            const start = DateTime.fromISO(
+              shift.sharedShift.startDateTime
+            ).setZone(tz);
+            const end = DateTime.fromISO(
+              shift.sharedShift.endDateTime
+            ).setZone(tz);
+
+            // Calculate “top%” and “height%” relative to 24h grid:
+            const minutesSinceMidnight = start.hour * 60 + start.minute;
+            const topPercent =
+              (minutesSinceMidnight / MINUTES_PER_DAY) * 100;
+
+            const shiftMinutes =
+              (end.hour * 60 + end.minute) -
+              (start.hour * 60 + start.minute);
+            const heightPercent = (shiftMinutes / MINUTES_PER_DAY) * 100;
+
+            // Determine which “column index” this shift should occupy:
+            const colIndex = cols[idx];
+            // Width percent = 100 / # of overlapping columns:
+            const widthPercent = 100 / maxCols;
+
+            // Build inline styles for absolute positioning:
+            const style: React.CSSProperties = {
+              top: `${topPercent}%`,
+              height: `${heightPercent}%`,
+              left: `${(dayIndex * 100) / 7 +
+                (colIndex * widthPercent) / 7}%`,
+              // We divide by 7 (days) because left=0–100% for each dayColumn:
+              // e.g. dayIndex=0 → left starts at 0%,
+              //       dayIndex=1 → left starts at 100/7%, etc.
+              width: `${widthPercent / 7 * 100}%`,
+              // Background color (you can customize):
+              backgroundColor: '#0078d4',
+              color: '#ffffff',
+            };
+
+            return (
+              <div
+                key={shift.id}
+                className={styles.shiftBlock}
+                style={style}
+              >
+                <div className={styles.shiftInfo}>
+                  <span className={styles.shiftTime}>
+                    {`${start.toFormat('HH:mm')} – ${end.toFormat('HH:mm')}`}
+                  </span>
+                  <span className={styles.shiftTeam}>
+                    {shift.teamInfo?.displayName ?? shift.teamId}
+                  </span>
+                </div>
+                {/* If more than one shift uses this same colIndex, show warning icon */}
+                {cols.filter((c) => c === colIndex).length > 1 && (
+                  <Icon
+                    iconName="WarningSolid"
+                    className={styles.overlapIcon}
+                  />
+                )}
               </div>
-
-              {/* Eventuelle vagter for netop denne dag: */}
-              {shifts.map((s, i) => {
-                const startDT = DateTime.fromISO(s.sharedShift.startDateTime).setZone(tz);
-                const endDT = DateTime.fromISO(s.sharedShift.endDateTime).setZone(tz);
-                const top = topPercent(startDT);
-                const height = heightPercent(startDT, endDT);
-                const colIndex = overlapCols[i];
-                const totalCols = Math.max(...overlapCols) + 1;
-
-                // Bredden = 100% / totalCols; Venstre forskydning = colIndex * (100/totalCols)%
-                const widthPercent = 100 / totalCols;
-                const leftPercent = colIndex * widthPercent;
-
-                return (
-                  <div
-                    key={s.id}
-                    className={styles.shiftBlock}
-                    style={{
-                      top: `${top}%`,
-                      height: `${height}%`,
-                      left: `${leftPercent}%`,
-                      width: `${widthPercent}%`
-                    }}
-                  >
-                    <div className={styles.shiftInfo}>
-                      <div className={styles.shiftTime}>
-                        {formatHour(s.sharedShift.startDateTime)} –{' '}
-                        {formatHour(s.sharedShift.endDateTime)}
-                      </div>
-                      <div className={styles.shiftTeam}>
-                        {s.teamInfo?.displayName ?? s.teamId}
-                      </div>
-                      {overlapCols.filter((c) => c === colIndex).length > 1 && (
-                        <Icon iconName="WarningSolid" className={styles.overlapIcon} />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          );
+            );
+          });
         })}
       </div>
     </div>

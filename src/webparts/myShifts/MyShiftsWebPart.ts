@@ -1,16 +1,12 @@
 // src/webparts/myShifts/MyShiftsWebPart.ts
-
 import { BaseClientSideWebPart } from '@microsoft/sp-webpart-base';
-import {
-  IPropertyPaneConfiguration,
-  PropertyPaneDropdown,
-  IPropertyPaneDropdownOption
-} from '@microsoft/sp-property-pane';
+import { IPropertyPaneConfiguration, PropertyPaneDropdown } from '@microsoft/sp-property-pane';
 import * as React from 'react';
 import * as ReactDom from 'react-dom';
 import { MSGraphClientV3 } from '@microsoft/sp-http';
 
-import MyShiftsCalendar, { IMyShiftsCalendarProps } from './components/MyShiftsCalendar';
+import MyShiftsCalendar from './components/MyShiftsCalendar';
+import WeekCalendar from './components/WeekCalendar';
 
 export interface IMyShiftsWebPartProps {
   viewMode: 'day' | 'week';
@@ -23,28 +19,24 @@ export default class MyShiftsWebPart extends BaseClientSideWebPart<IMyShiftsWebP
   public async onInit(): Promise<void> {
     // Hent MSGraphClientV3
     this._graphClient = await this.context.msGraphClientFactory.getClient('3');
-
-    // Hent korrekt Azure AD GUID fra context (ikke legacyPageContext.userId)
-    const aadGuid = this.context.pageContext.aadInfo?.userId;
-    if (aadGuid) {
-      this._userObjectId = aadGuid;
-    } else {
-      // Fallback: udtræk af loginName (hvis aadInfo.userId er undefined)
-      const loginName = this.context.pageContext.user.loginName || '';
-      const parts = loginName.split('|');
-      this._userObjectId = parts.length >= 3 ? parts[2] : '';
-    }
+    // Hent Azure AD objectId fra konteksten
+    this._userObjectId = this.context.pageContext.aadInfo.userId!;
   }
 
   public render(): void {
-    const elementProps: IMyShiftsCalendarProps = {
+    const sharedProps = {
       graphClient: this._graphClient,
       userId: this._userObjectId,
-      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      viewMode: this.properties.viewMode // "day" eller "week"
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone
     };
 
-    const element = React.createElement(MyShiftsCalendar, elementProps);
+    let element: React.ReactElement;
+    if (this.properties.viewMode === 'week') {
+      element = React.createElement(WeekCalendar, sharedProps);
+    } else {
+      element = React.createElement(MyShiftsCalendar, sharedProps);
+    }
+
     ReactDom.render(element, this.domElement);
   }
 
@@ -53,22 +45,22 @@ export default class MyShiftsWebPart extends BaseClientSideWebPart<IMyShiftsWebP
   }
 
   protected getPropertyPaneConfiguration(): IPropertyPaneConfiguration {
-    const dropdownOptions: IPropertyPaneDropdownOption[] = [
-      { key: 'day', text: 'Dags-visning' },
-      { key: 'week', text: 'Uge-visning' }
-    ];
-
     return {
       pages: [
         {
-          header: { description: 'Vælg visnings-mode' },
+          header: {
+            description: 'Vælg visning'
+          },
           groups: [
             {
-              groupName: 'Visning',
+              groupName: 'Opsætning',
               groupFields: [
                 PropertyPaneDropdown('viewMode', {
-                  label: 'Vis som:',
-                  options: dropdownOptions
+                  label: 'Visningstype',
+                  options: [
+                    { key: 'day', text: 'Dagvisning' },
+                    { key: 'week', text: 'Ugekalender' }
+                  ]
                 })
               ]
             }

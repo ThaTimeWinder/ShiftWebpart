@@ -1,112 +1,191 @@
-/* WeekCalendar.module.scss */
+/* src/webparts/myShifts/components/WeekCalendar.module.scss */
 
-.weekContainer {
-  width: 100%;
-  overflow-x: auto; /* Hvis for smalt til skærmen */
-  font-family: Segoe UI, sans-serif;
-  font-size: 12px;
+/* ------------------------------------------------------------ */
+/*  APP‐SKABELON – NAVIGATION OG OVERSKRIFT                      */
+/* ------------------------------------------------------------ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
 }
 
-/* --- Header‐række (dagenavne/datoer) --- */
+.navButton {
+  padding: 0.5rem 1rem;
+  background-color: #0078d4;
+  color: white;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.navButton:hover {
+  background-color: #005a9e;
+}
+
+.weekLabel {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ */
+/* 1) OVERRORDNET WEEK‐CONTAINER                                 */
+/* ------------------------------------------------------------ */
+.weekContainer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 800px;         /* ← Justér denne højde, så én “time” får en behagelig højde (f.eks. 800px / 24 timer ≈ 33px per time) */
+  position: relative;    /* for absolut-positionerede shiftBlocks i .hourGrid */
+  font-family: Segoe UI, Arial, sans-serif;
+  box-sizing: border-box;
+  border: 1px solid #e1dfdd;
+  background-color: #faf9f8;
+}
+
+/* ------------------------------------------------------------ */
+/* 2) HEADER‐RÆKKE (dvs. dage + bredde til klokkeslæt‐kolonne)    */
+/* ------------------------------------------------------------ */
 .headerRow {
   display: grid;
   grid-template-columns: 60px repeat(7, 1fr);
-  border-bottom: 1px solid #ccc;
-  background-color: #f2f2f2;
+  background-color: #f3f2f1;
+  border-bottom: 1px solid #ddd;
 }
 
+/* Gate‐kolonnen (klokkeslæt) – 60px bred, centreret tekst */
 .hourHeader {
-  /* Tom venstre-celle i header = 60px bredt */
-  width: 60px;
-  border-right: 1px solid #ccc;
-}
-
-.dayHeader {
-  /* Hver dag‐header */
+  grid-column: 1 / 2;
   text-align: center;
-  padding: 8px 4px;
-  border-left: 1px solid #ccc;
-  font-weight: 600;
-  background-color: #fafafa;
+  font-size: 0.875rem;
+  padding: 6px 0;
+  border-right: 1px solid #ddd;
+  background-color: #f3f2f1;
+  z-index: 2;  /* ligger over de blå vagter, så man altid kan læse tiderne */
 }
 
-/* --- Time‐grid (24 rækker, hver 60px høj) --- */
+/* Dags‐kolonnernes overskrifter (Mon, Tue osv.) */
+.dayHeader {
+  text-align: center;
+  font-size: 0.875rem;
+  padding: 6px 0;
+  border-right: 1px solid #ddd;
+  background-color: #f3f2f1;
+  z-index: 2;
+}
+
+/* ------------------------------------------------------------ */
+/* 3) HOVED‐GRID (24 rækker × 8 kolonner) med faste “row‐højder”  */
+/* ------------------------------------------------------------ */
 .hourGrid {
-  position: relative; /* shiftBlock‐divs er absolutte indenfor denne container */
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 1440px; /* 24 timer * 60px/timen */
-  border-left: 1px solid #ccc;
-  border-right: 1px solid #ccc;
-  background-color: #ffffff;
-}
-
-.hourRow {
+  position: relative;
+  flex: 1;  /* fylder al pladsen under headerRow */
   display: grid;
   grid-template-columns: 60px repeat(7, 1fr);
-  height: 60px; /* Hver time = 60px */
-  border-top: 1px solid #eee;
+  /* Her definerer vi 24 rækker. Hvis .weekContainer har height: 800px, */
+  /* vil hver row = ca. 800px / 24 ≈ 33.3px. Du kan justere height ovenfor. */
+  grid-template-rows: repeat(24, 1fr);
+  overflow: hidden;
 }
 
+/* Selve hver “time‐row” (men vi bruger display: contents, for at lade børnene placere sig selv) */
+.hourRow {
+  display: contents;
+}
+
+/* 3.a) VENSTRESIDE: Hver times label */
 .hourLabel {
-  text-align: right;
-  padding-right: 4px;
-  color: #666;
-  font-size: 11px;
-  border-right: 1px solid #eee;
+  grid-column: 1 / 2;
+  grid-row: span 1;
+  text-align: center;
+  font-size: 0.75rem;
+  border-top: 1px solid #eee;
+  background-color: #faf9f8;
+  z-index: 2;
 }
 
+/* 3.b) DAGSKOLONNERNE (hver enkelt dag‐celle i grid‐rødt) */
 .dayColumn {
-  border-left: 1px solid #eee;
-  /* Tom celle, shiftBlocks lægges ovenpå */
+  grid-column: span 1;
+  grid-row: span 1;
+  border-top: 1px solid #eee;
+  border-right: 1px solid #eee;
+  position: relative;  /* container for de absolut‐placerede .shiftBlock */
 }
 
-/* --- SHIFT‐blok --- */
+/* ------------------------------------------------------------ */
+/* 4) SHIFTBLOCK – selve vagt‐boksen                              */
+/* ------------------------------------------------------------ */
 .shiftBlock {
   position: absolute;
+  /* Bredden begrænser vi til max 90% af dag‐cellen, så overlappende vagter kan få sit eget “spor”. */
+  width: calc(100% * 0.9);
+  /* Flyt boksens venstre side 5% inde i dag‐cellen – så man kan se overlap. */
+  left: calc(100% * 0.05);
+  background-color: rgba(0, 120, 212, 0.6);
+  border: 1px solid #005a9e;
   border-radius: 2px;
-  padding: 2px;
-  box-sizing: border-box;
+  padding: 2px 6px;
+  font-size: 0.75rem;
   overflow: hidden;
-  font-size: 10px;
-  z-index: 5; /* Sidder ovenpå grid‐cellerne */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  z-index: 1;  /* så den ligger under .hourLabel/.dayHeader, men over selve “grid‐baggrunden” */
 }
 
-/* Indhold i shift‐blokken */
+/* Hvis du har flere vagter, der overlapper i tid, kan du i din TSX‐logic give en anden “left” for anden vagt (fx left: calc(100% * 0.15)) */
+/* Eller en ekstra klasse, fx `.shiftBlock.shiftOverlap` med f.eks.: left: calc(100% * 0.15); width: calc(100% * 0.8); */
+
+/* ------------------------------------------------------------ */
+/* 5) INDHOLD I BLÅ BOKS – vagtinfo                               */
+/* ------------------------------------------------------------ */
 .shiftInfo {
   display: flex;
   flex-direction: column;
-  pointer-events: none;
+  gap: 2px;
 }
 
 .shiftTime {
+  font-size: 0.75rem;
   font-weight: 600;
+  color: #e1e1e1; /* Lys grå tekst på mørk baggrund */
 }
 
 .shiftTeam {
-  font-size: 10px;
-  opacity: 0.9;
+  font-size: 0.7rem;
+  color: #f1f1f1;
 }
 
-/* Overlap‐ikon (rødt) når >1 shift i samme kolonne */
-.overlapIcon {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  color: #a80000;
-  font-size: 14px;
-}
-
-/* --- STATE‐MESSAGES --- */
+/* ------------------------------------------------------------ */
+/* 6) LOADING / STATUS / ERROR – hvis du returnerer tidligt        */
+/* ------------------------------------------------------------ */
 .status {
   padding: 16px;
+  font-style: italic;
+  color: #333;
   text-align: center;
-  color: #444;
 }
 
 .error {
   padding: 16px;
+  color: #d13438;
+  font-weight: 600;
   text-align: center;
-  color: #a80000;
+}
+.shiftOverlap {
+  /* Når en vagt overlapper en anden, giver vi f.eks. en lidt smallere bredde */
+  width: calc(100% * 0.75);
+  left: calc(100% * 0.125);
+  background-color: rgba(0, 120, 212, 0.8);
+}
+.overlapIcon {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 0.65rem;
+  color: #d13438;
+  z-index: 3; /* Ligger øverst inde i .shiftBlock */
 }

@@ -1,26 +1,39 @@
 // src/webparts/myShifts/components/WeekCalendar.tsx
 
 import * as React from 'react';
-import { DefaultButton, Text, Spinner, SpinnerSize } from '@fluentui/react';
+import {
+  DefaultButton,
+  Text,
+  Spinner,
+  SpinnerSize,
+  IPersonaProps,
+} from '@fluentui/react';
+import {
+  NormalPeoplePicker,
+} from '@fluentui/react/lib/Pickers';
 import { DateTime, Interval } from 'luxon';
 import styles from './WeekCalendar.module.scss';
 
 export interface IShift {
-  startTime:  DateTime;   // Luxon DateTime for vagt‐start (lokal tid)
-  endTime:    DateTime;   // Luxon DateTime for vagt‐slut (lokal tid)
+  startTime:  DateTime;
+  endTime:    DateTime;
   teamName:   string;
   isOverlap?: boolean;
-  theme:      string;     // Fx "white", "blue", "green", "darkPink", "yellow" osv.
+  theme:      string;
 }
 
 export interface IWeekCalendarProps {
-  weekStart:      DateTime;      // Mandag kl. 00:00 (lokal tid)
-  shifts:         IShift[];      // Liste af vagter i denne uge
-  allEmpty:       boolean;       // True hvis ingen vagter (og vi ikke loader)
-  isLoading:      boolean;       // True hvis vi venter på data
-  goPreviousWeek: () => void;    // Callback til “Forrige uge”
-  goNextWeek:     () => void;    // Callback til “Næste uge”
-  onRefresh:      () => void;    // Callback til “Opdater data”
+  weekStart:        DateTime;
+  shifts:           IShift[];
+  allEmpty:         boolean;
+  isLoading:        boolean;
+  goPreviousWeek:   () => void;
+  goNextWeek:       () => void;
+  onRefresh:        () => void;
+  superUserMode:    boolean;
+  selectedUserId:   string;
+  onUserSelected:   (userId: string) => void;
+  graphClient:      any; // MSGraphClientV3
 }
 
 const HOURS_IN_DAY = 24;
@@ -34,13 +47,14 @@ const WeekCalendar: React.FC<IWeekCalendarProps> = ({
   goPreviousWeek,
   goNextWeek,
   onRefresh,
+  superUserMode,
+  selectedUserId,
+  onUserSelected,
+  graphClient,
 }) => {
   const pixelsPerHour = WEEK_CONTAINER_HEIGHT_PX / HOURS_IN_DAY;
 
-  /**
-   * Returnerer dag‐index [0..6], hvis dt ligger inden for [mandag..søndag].
-   * Ellers −1 (< mandag) eller 7 (> søndag).
-   */
+  // 1) Hjælpefunktion til at finde dag‐index [0..6]
   const getDayIndex = (dt: DateTime): number => {
     const diffDays = dt.startOf('day').diff(weekStart.startOf('day'), 'days').days;
     if (diffDays < 0) return -1;
@@ -48,17 +62,61 @@ const WeekCalendar: React.FC<IWeekCalendarProps> = ({
     return Math.floor(diffDays);
   };
 
+  // 2) PeoplePicker:  
+  //    • onFilterUsers: Søger Azure AD via Graph efter displayName-startsWith(filterText)
+  //    • onEmptyInputFocus: Returnerer tom liste (vi foreslår først, når bruger skriver)
+  //    • onSelectedUserChange: Kaldes når en bruger vælges
+  const onFilterUsers = async (filterText: string, _currentPersonas: IPersonaProps[]): Promise<IPersonaProps[]> => {
+    if (!filterText) {
+      return [];
+    }
+    try {
+      const response: any = await graphClient
+        .api('/users')
+        .version('v1.0')
+        .filter(`startsWith(displayName,'${filterText}')`)
+        .select('id,displayName,userPrincipalName')
+        .top(10)
+        .get();
+
+      return (response.value ?? []).map((u: any) => ({
+        key:              u.id,
+        text:             u.displayName,
+        secondaryText:    u.userPrincipalName || u.id,
+        imageInitials:    u.displayName
+                             .split(' ')
+                             .map((n: string) => n.charAt(0))
+                             .join('')
+                             .toUpperCase(),
+        hidePersonaDetails: false,
+      }));
+    } catch (error) {
+      console.error('Fejl ved søgning efter brugere: ', error);
+      return [];
+    }
+  };
+
+  const onEmptyInputFocus = (): IPersonaProps[] => {
+    return [];
+  };
+
+  const onSelectedUserChange = (items?: IPersonaProps[]) => {
+    if (items && items.length > 0) {
+      onUserSelected(items[0].secondaryText || (items[0].key as string));
+    }
+  };
+
   interface IInternalShift {
-    dayIndex:     number;   // 0..6
-    startHourDec: number;   // f.eks. 5.25 for 05:15
-    endHourDec:   number;   // f.eks. 7.25 for 07:15 (eller 24 hvis split)
+    dayIndex:     number;
+    startHourDec: number;
+    endHourDec:   number;
     teamName:     string;
     isOverlap:    boolean;
-    theme:        string;   // f.eks. "white", "blue", "darkPink", "green"
-    keyBase:      string;   // f.eks. "sh0-part1"
+    theme:        string;
+    keyBase:      string;
   }
 
-  // 1) Transformér alle vagter til 1 eller 2 “interne” dele
+  // 3) Transformér alle vagter til interne “stykker”
   const internalShifts: IInternalShift[] = [];
 
   shifts.forEach((shift, idx) => {
@@ -70,7 +128,7 @@ const WeekCalendar: React.FC<IWeekCalendarProps> = ({
     const startHourDec = startLocal.hour + startLocal.minute / 60;
     const endHourDec   = endLocal.hour + endLocal.minute / 60;
 
-    // A) Samme dag
+    // A) Hvis samme dag
     if (
       startDayIdx >= 0 &&
       startDayIdx <= 6 &&
@@ -116,13 +174,13 @@ const WeekCalendar: React.FC<IWeekCalendarProps> = ({
     }
   });
 
-  // 2) Gruppér interne vagter pr. dag [0..6]
+  // 4) Gruppér interne vagter pr. dag
   const shiftsByDay: IInternalShift[][] = Array.from({ length: 7 }, () => []);
   internalShifts.forEach((intShift) => {
     shiftsByDay[intShift.dayIndex].push(intShift);
   });
 
-  // 3) Beregn overlap‐slots pr. dag vha. Luxon Interval
+  // 5) Overlap‐beregning vha. Luxon Interval
   interface IOverlapSlot {
     slotIndex:  number;
     totalSlots: number;
@@ -162,9 +220,41 @@ const WeekCalendar: React.FC<IWeekCalendarProps> = ({
     });
   }
 
-  // 4) Render
+  // 6) Render
   return (
     <div className={styles.weekContainer}>
+      {/* ------------------------------------------------------------ */}
+      {/*  SUPER USER: Bruger‐søger (kun synlig når superUserMode = true) */}
+      {/* ------------------------------------------------------------ */}
+      {superUserMode && (
+        <div style={{ marginBottom: '1rem' }}>
+          <NormalPeoplePicker
+            onResolveSuggestions={onFilterUsers}
+            getTextFromItem={(item: IPersonaProps) => item.text || ''}
+            pickerSuggestionsProps={{
+              suggestionsHeaderText: 'Søg efter bruger',
+            }}
+            onEmptyInputFocus={onEmptyInputFocus}
+            onChange={onSelectedUserChange}
+            defaultSelectedItems={selectedUserId
+              ? [
+                  {
+                    key:           selectedUserId,
+                    text:          '', 
+                    secondaryText: selectedUserId,
+                  },
+                ]
+              : []
+            }
+            resolveDelay={300}
+            itemLimit={1}
+            inputProps={{
+              placeholder: 'Indtast navn eller e‐mail…',
+            }}
+          />
+        </div>
+      )}
+
       {/* ------------------------------------------------------------ */}
       {/*  NAVIGATION + UGEOVERSKRIFT                                    */}
       {/* ------------------------------------------------------------ */}
@@ -247,8 +337,8 @@ const WeekCalendar: React.FC<IWeekCalendarProps> = ({
           })}
 
           {/* 
-            5) Opret én “dag‐container” pr. dag, der spænder over alle 24 rækker
-               og er reference for absolut‐positionerede vagt‐bokse
+            7) Opret én “dag‐container” pr. dag (dækker alle 24 rækker) 
+               og er reference for absolut‐positionerede vakter
           */}
           {Array.from({ length: 7 }).map((_, dayIdx) => {
             return (
@@ -263,41 +353,37 @@ const WeekCalendar: React.FC<IWeekCalendarProps> = ({
                   overflow:        'hidden',
                 }}
               >
-                {/* 6) Inde i hver dag‐container lægger vi vagter for netop denne dag */}
+                {/* 8) Inden i hver dag‐container lægger vi vakter for netop denne dag */}
                 {shiftsByDay[dayIdx].map((intShift) => {
                   const { slotIndex, totalSlots } = overlapMap.get(intShift.keyBase)!;
 
-                  // 1) Beregn “rå” width- & left-værdier i procent
+                  // Beregn width og left i procent
                   let widthPercent: number;
                   let leftPercent:  number;
                   if (totalSlots === 1) {
-                    widthPercent = 80;
-                    leftPercent  = 0; // Centrér én vagt
+                    widthPercent = 90;
+                    leftPercent  = 5;
                   } else {
-                    widthPercent = 85 / totalSlots;
+                    widthPercent = 100 / totalSlots;
                     leftPercent  = slotIndex * widthPercent;
                   }
-
-                  // 2) Clamp i bredden: sikre at left+width ≤ 100
+                  // Clamp i bredden
                   if (leftPercent + widthPercent > 100) {
                     widthPercent = 100 - leftPercent;
                   }
-                  // Hvis leftPercent > 100 (for sikkerhed)
                   if (leftPercent > 100) {
                     leftPercent  = 100;
                     widthPercent = 0;
                   }
 
-                  // 3) Clamp start & end til [0..24] i højden
+                  // Clamp start/end til [0..24]
                   let startH = intShift.startHourDec;
                   let endH   = intShift.endHourDec;
-                  if (startH < 0)   startH = 0;
-                  if (startH > 24)  startH = 24;
-                  if (endH < 0)     endH   = 0;
-                  if (endH > 24)    endH   = 24;
-                  if (endH <= startH) {
-                    return null;
-                  }
+                  if (startH < 0)  startH = 0;
+                  if (startH > 24) startH = 24;
+                  if (endH < 0)    endH   = 0;
+                  if (endH > 24)   endH   = 24;
+                  if (endH <= startH) return null;
 
                   const topPx    = startH * pixelsPerHour;
                   const heightPx = (endH - startH) * pixelsPerHour;
@@ -307,7 +393,7 @@ const WeekCalendar: React.FC<IWeekCalendarProps> = ({
                     : styles.shiftBlock;
 
                   // CamelCase lookup af tema‐klasse
-                  const rawTheme = intShift.theme; // fx "green", "darkPink", "yellow"
+                  const rawTheme = intShift.theme;
                   const key = `theme${rawTheme.charAt(0).toUpperCase()}${rawTheme.slice(1)}`;
                   const themeClassName: string = (styles as any)[key] || '';
 
@@ -316,9 +402,7 @@ const WeekCalendar: React.FC<IWeekCalendarProps> = ({
                     const formatTime = (hourDec: number): string => {
                       const h = Math.floor(hourDec);
                       const m = Math.round((hourDec - h) * 60);
-                      return `${h.toString().padStart(2, '0')}:${m
-                        .toString()
-                        .padStart(2, '0')}`;
+                      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
                     };
                     const startText = formatTime(startH);
                     const endText   = endH === 24 ? '24:00' : formatTime(endH);

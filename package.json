@@ -12,14 +12,14 @@
     "test": "gulp test"
   },
   "dependencies": {
-    "@fluentui/react": "^8.106.4",
+    "@fluentui/react": "^8.123.0",
+    "@microsoft/mgt-element": "^4.6.0",
     "@microsoft/sp-component-base": "1.21.1",
     "@microsoft/sp-core-library": "1.21.1",
     "@microsoft/sp-lodash-subset": "1.21.1",
     "@microsoft/sp-office-ui-fabric-core": "1.21.1",
     "@microsoft/sp-property-pane": "1.21.1",
     "@microsoft/sp-webpart-base": "1.21.1",
-    "@microsoft/mgt-element": "^4.6.0",
     "@pnp/core": "^4.13.0",
     "luxon": "^2.5.2",
     "react": "17.0.1",

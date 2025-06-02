@@ -1,4 +1,5 @@
 // src/webparts/myShifts/services/ShiftsService.ts
+
 import { MSGraphClientV3 } from '@microsoft/sp-http';
 import { PnPClientStorage, dateAdd } from '@pnp/core';
 import { DateTime } from 'luxon';
@@ -25,26 +26,33 @@ export interface IShift {
   sharedShift: {
     startDateTime: string;  // UTC ISO‐8601
     endDateTime:   string;  // UTC ISO‐8601
+    theme?:        string;  // (valgfrit, hvis du vil viderebringe tema)
   };
 }
 
 /**
  * Henter vagter for én lokal dag (inkl. vagter, der overlapper midnat).
- * Resultatet caches i sessionStorage i 5 minutter pr. dag+brugerguid.
+ * Hvis userObjectId er tom (''), udelades "userId eq" fra filteret, så Graph henter egne vagter.
+ * Hvis userObjectId er en GUID, tilføjes "userId eq '{GUID}'" i filteret for at hente en anden brugers vagter.
+ * Data caches i sessionStorage i 5 minutter pr. dag+brugerguid.
+ *
+ * @param graph         En instans af MSGraphClientV3 (SPFx).
+ * @param day           Luxon DateTime for den ønskede dag (lokal tid).
+ * @param userObjectId  GUID på den bruger, vi vil hente vagter for; hvis tom streng, hentes egne vagter.
  */
 export async function getShiftsForDay(
   graph: MSGraphClientV3,
   day: DateTime,
-  userObjectId: string
+  userObjectId: string  // Hvis tom streng = hent egne vagter (ingen userId i filter)
 ): Promise<IShift[]> {
-  // Cache‐nøgle inkluderer både dato og bruger‐GUID
+  // 1) Cache‐nøgle inkluderer både dato og userObjectId (evt. tom streng)
   const cacheKey = `shifts-${day.toISODate()}-${userObjectId}`;
 
-  // Hent (eller gem hvis ikke i cache)
+  // 2) Hent (eller gem hvis ikke i cache)
   const data = await storage.getOrPut<IShift[]>(
     cacheKey,
     async () => {
-      // Hent én dag ekstra før/efter til overlap
+      // 2.a) Beregn ét døgn ekstra før/efter i UTC (så vi fanger overlap)
       const startUtc = day
         .minus({ days: 1 })
         .startOf('day')
@@ -56,17 +64,22 @@ export async function getShiftsForDay(
         .toUTC()
         .toISO({ suppressMilliseconds: true });
 
-      // Byg $filter for Graph: inkl. bruger‐GUID, start+slut
-      const filter = [
+      // 2.b) Build filter‐dele på tidsinterval + evt. userId
+      const filterParts: string[] = [
         `sharedShift/startDateTime ge ${startUtc}`,
-        `sharedShift/endDateTime   le ${endUtc}`,
-        `userId eq '${userObjectId}'`,
-      ].join(' and ');
+        `sharedShift/endDateTime   le ${endUtc}`
+      ];
+      // Kun tilføj "userId eq '…'" hvis vi har en GUID
+      if (userObjectId) {
+        filterParts.push(`userId eq '${userObjectId}'`);
+      }
+      const filterStr = filterParts.join(' and ');
 
+      // 2.c) Kald Graph‐endpointet /me/joinedTeams/getShifts med det dynamiske filter
       const res = await graph
         .api('/me/joinedTeams/getShifts')
         .version('beta')
-        .filter(filter)
+        .filter(filterStr)
         .top(500)
         .get();
 
@@ -76,16 +89,13 @@ export async function getShiftsForDay(
     dateAdd(new Date(), 'minute', TTL_MINUTES)
   );
 
-  // Præcis dags‐interval i UTC (lokal midnat start og slut)
+  // 3) Filtrér kun vagter, der overlapper "day" (præcist UTC-interval)
   const startDayUtc = day.startOf('day').toUTC();
-  const endDayUtc = day.endOf('day').toUTC();
+  const endDayUtc   = day.endOf('day').toUTC();
 
-  // Returner kun vagter, der **overlapper** denne dag
   return data.filter((s) => {
-    const st = DateTime.fromISO(s.sharedShift.startDateTime);
-    const et = DateTime.fromISO(s.sharedShift.endDateTime);
-
-    // Overlap = start før dagens slut AND slut efter dagens start
+    const st = DateTime.fromISO(s.sharedShift.startDateTime, { zone: 'utc' });
+    const et = DateTime.fromISO(s.sharedShift.endDateTime,   { zone: 'utc' });
     return st < endDayUtc && et > startDayUtc;
   });
 }

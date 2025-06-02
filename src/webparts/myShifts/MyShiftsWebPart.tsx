@@ -2,120 +2,147 @@
 
 import * as React from 'react';
 import * as ReactDom from 'react-dom';
-
 import { Version } from '@microsoft/sp-core-library';
 import {
   BaseClientSideWebPart,
   IPropertyPaneConfiguration,
-} from '@microsoft/sp-webpart-base';
-import {
+  IPropertyPaneField,
   IPropertyPaneDropdownOption,
   PropertyPaneDropdown,
-} from '@microsoft/sp-property-pane';
+  PropertyPaneToggle,
+  PropertyPaneTextField,
+  IPropertyPaneToggleProps,
+  IPropertyPaneTextFieldProps
+} from '@microsoft/sp-webpart-base';
 import { MSGraphClientV3 } from '@microsoft/sp-http';
 import { DateTime } from 'luxon';
-import { PnPClientStorage } from '@pnp/core'; // ← Importér PnPClientStorage
 
 import MyShiftsCalendar from './components/MyShiftsCalendar';
 import WeekCalendar, {
   IShift as IComponentShift,
-  IWeekCalendarProps,
+  IWeekCalendarProps
 } from './components/WeekCalendar';
 
-// Rå‐interface fra jeres service
 import { IShift as IServiceShift, getShiftsForDay } from './services/ShiftsService';
 
 export interface IMyShiftsWebPartProps {
-  viewMode: 'day' | 'week';
+  viewMode:        'day' | 'week';
+  superUserMode:   boolean;
+  selectedUserId:  string;    // UPN eller GUID
 }
 
 export default class MyShiftsWebPart extends BaseClientSideWebPart<IMyShiftsWebPartProps> {
   private _graphClient!: MSGraphClientV3;
-  private _userObjectId!: string;
-
-  /** Ugens start på mandag kl. 00:00 (lokal tid) */
+  private _loggedInUserGuid!: string;                // Den autentificerede brugers GUID
+  private _selectedUserGuid: string = '';            // Opløst GUID, når bruger angiver UPN
   private _currentWeekStart: DateTime = DateTime.local()
     .startOf('week')
-    .plus({ days: 1 });
-
-  /** Liste med alle mapperede vagter til WeekCalendar */
+    .plus({ days: 1 }); // Luxon: startOf('week') = søndag → +1 = mandag
   private _shiftsForWeek: IComponentShift[] = [];
-
-  /** Om vi indlæser vagter i øjeblikket */
   private _isLoading: boolean = false;
 
   public async onInit(): Promise<void> {
+    // 1) Hent en instans af MSGraphClientV3
     this._graphClient = await this.context.msGraphClientFactory.getClient('3');
-    this._userObjectId = this.context.pageContext.aadInfo.userId!;
+    // 2) Hent den loggede‐ind brugerens GUID
+    this._loggedInUserGuid = this.context.pageContext.aadInfo.userId!;
+    // 3) Hvis der er en tidligere angivet selectedUserId, hent GUID nu
+    if (this.properties.selectedUserId) {
+      await this._resolveSelectedUserGuid(this.properties.selectedUserId);
+    }
+    // 4) Indlæs data for den aktuelle uge
     await this._loadShiftsForWeek(this._currentWeekStart);
   }
 
   /**
-   * Henter vagter for uge [mandag..søndag]:
-   *   1) Kalder getShiftsForDay for hver dag
-   *   2) Mapper til komponent‐IShift
+   * Hvis input allerede er GUID, gem det. Ellers antag UPN/mail and hent GUID fra Graph.
+   */
+  private async _resolveSelectedUserGuid(input: string): Promise<void> {
+    const guidRegex = /^[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}$/;
+    if (guidRegex.test(input)) {
+      this._selectedUserGuid = input;
+      return;
+    }
+    try {
+      const user: any = await this._graphClient
+        .api(`/users/${encodeURIComponent(input)}`)
+        .version('v1.0')
+        .select('id')
+        .get();
+      this._selectedUserGuid = user.id;
+    } catch (error) {
+      console.error(`Kunne ikke finde bruger for "${input}":`, error);
+      this._selectedUserGuid = '';
+    }
+  }
+
+  /**
+   * Henter vagter for hele ugen [mandag..søndag]:
+   * - Hvis superUserMode = true OG en valid GUID er opløst, bruger vi den GUID.
+   * - Ellers hentes egne vagter ved at sende tom streng (som i ShiftsService betyder “egen bruger”).
+   *
+   * Vi kalder altid getShiftsForDay(graph, dag, effectiveUserGuid). Hvis effectiveUserGuid = '',
+   * tilføjes der ikke “userId eq …” i filteret, så Graph returnerer kun egen brugers shifts.
    */
   private async _loadShiftsForWeek(weekStart: DateTime): Promise<void> {
-    // Marker “loading” og re-render straks
     this._isLoading = true;
-    this.render();
+    this.render(); // Vis spinner straks
 
-    const allServiceShifts: IServiceShift[] = [];
-    for (let i = 0; i < 7; i++) {
-      const singleDay: DateTime = weekStart.plus({ days: i });
-      try {
-        const shiftsForDay: IServiceShift[] = await getShiftsForDay(
+    try {
+      const allServiceShifts: IServiceShift[] = [];
+      for (let i = 0; i < 7; i++) {
+        const singleDay = weekStart.plus({ days: i });
+        const effectiveUserGuid =
+          this.properties.superUserMode && this._selectedUserGuid
+            ? this._selectedUserGuid
+            : this._loggedInUserGuid;
+        const shiftsForDay = await getShiftsForDay(
           this._graphClient,
           singleDay,
-          this._userObjectId
+          effectiveUserGuid
         );
         allServiceShifts.push(...shiftsForDay);
-      } catch (err) {
-        console.error(`Fejl ved hent af vagter for dag ${singleDay.toISODate()}:`, err);
       }
+
+      this._shiftsForWeek = allServiceShifts.map((srv) => {
+        const startUtc   = DateTime.fromISO(srv.sharedShift.startDateTime, { zone: 'utc' });
+        const endUtc     = DateTime.fromISO(srv.sharedShift.endDateTime,   { zone: 'utc' });
+        const startLocal = startUtc.setZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+        const endLocal   = endUtc.setZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+        let teamName = 'Ukendt team';
+        if (srv.schedulingGroupInfo?.displayName) {
+          teamName = srv.schedulingGroupInfo.displayName;
+        } else if (srv.teamInfo?.displayName) {
+          teamName = srv.teamInfo.displayName;
+        }
+
+        const theme = srv.sharedShift.theme || 'blue';
+        return {
+          startTime: startLocal,
+          endTime:   endLocal,
+          teamName:  teamName,
+          isOverlap: false,
+          theme:     theme
+        } as IComponentShift;
+      });
+    } catch (error) {
+      console.error('Fejl ved hent af vagter for uge:', error);
+      this._shiftsForWeek = [];
+    } finally {
+      this._isLoading = false;
+      this.render();
     }
-
-    const mapped: IComponentShift[] = allServiceShifts.map((srv) => {
-      const startUtc = DateTime.fromISO(srv.sharedShift.startDateTime, { zone: 'utc' });
-      const endUtc   = DateTime.fromISO(srv.sharedShift.endDateTime,   { zone: 'utc' });
-      const tz       = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const startLocal = startUtc.setZone(tz);
-      const endLocal   = endUtc.setZone(tz);
-
-      let teamName = 'Ukendt team';
-      if (srv.schedulingGroupInfo && srv.schedulingGroupInfo.displayName) {
-        teamName = srv.schedulingGroupInfo.displayName;
-      } else if (srv.teamInfo && srv.teamInfo.displayName) {
-        teamName = srv.teamInfo.displayName;
-      }
-
-      // Hent Graph‐temaet (cast til any, da feltet ikke findes i IServiceShift-interface)
-      const rawTheme = (srv.sharedShift as any).theme;
-      const theme    = typeof rawTheme === 'string' ? rawTheme : 'white';
-
-      return {
-        startTime:  startLocal,
-        endTime:    endLocal,
-        teamName:   teamName,
-        isOverlap:  false,
-        theme:      theme,
-      } as IComponentShift;
-    });
-
-    this._shiftsForWeek = mapped;
-    this._isLoading = false;
-    this.render();
   }
 
   public render(): void {
     const sharedCalProps = {
       graphClient: this._graphClient,
-      userId:       this._userObjectId,
-      tz:           Intl.DateTimeFormat().resolvedOptions().timeZone,
+      userId:      this._loggedInUserGuid,
+      tz:          Intl.DateTimeFormat().resolvedOptions().timeZone
     };
 
     let element: React.ReactElement;
-
     if (this.properties.viewMode === 'week') {
       const weekProps: IWeekCalendarProps = {
         weekStart:      this._currentWeekStart,
@@ -124,11 +151,19 @@ export default class MyShiftsWebPart extends BaseClientSideWebPart<IMyShiftsWebP
         isLoading:      this._isLoading,
         goPreviousWeek: this._goPreviousWeek.bind(this),
         goNextWeek:     this._goNextWeek.bind(this),
-        onRefresh:      this._refreshCurrentWeek.bind(this), // Nyt callback
+        onRefresh:      this._onRefresh.bind(this),
+        superUserMode:  this.properties.superUserMode,
+        selectedUserId: this.properties.selectedUserId,
+        onUserSelected: async (newUserId: string) => {
+          this.properties.selectedUserId = newUserId;
+          await this._resolveSelectedUserGuid(newUserId);
+          await this._loadShiftsForWeek(this._currentWeekStart);
+        },
+        graphClient:    this._graphClient
       };
-      element = <WeekCalendar {...weekProps} />;
+      element = React.createElement(WeekCalendar, weekProps);
     } else {
-      element = <MyShiftsCalendar {...sharedCalProps} />;
+      element = React.createElement(MyShiftsCalendar, sharedCalProps);
     }
 
     ReactDom.render(element, this.domElement);
@@ -138,34 +173,35 @@ export default class MyShiftsWebPart extends BaseClientSideWebPart<IMyShiftsWebP
     ReactDom.unmountComponentAtNode(this.domElement);
   }
 
-  /** Gå 7 dage tilbage + hent data for den uge */
   private async _goPreviousWeek(): Promise<void> {
     this._currentWeekStart = this._currentWeekStart.minus({ days: 7 });
     await this._loadShiftsForWeek(this._currentWeekStart);
   }
 
-  /** Gå 7 dage frem + hent data for den uge */
   private async _goNextWeek(): Promise<void> {
     this._currentWeekStart = this._currentWeekStart.plus({ days: 7 });
     await this._loadShiftsForWeek(this._currentWeekStart);
   }
 
   /**
-   * Genindlæs data for den nuværende uge (kaldes fra “Opdater data”‐knappen).
-   * Først sletter vi cache‐nøglerne for alle 7 dage i ugen, så getShiftsForDay
-   * henter frisk data fra Graph i stedet for sessionStorage.
+   * “Opdater data” fjerner cache for enten valgt bruger‐GUID eller egen GUID,
+   * og genindlæser samme uge.
    */
-  private async _refreshCurrentWeek(): Promise<void> {
-    const storage = new PnPClientStorage().session;
+  private async _onRefresh(): Promise<void> {
+    const effectiveUserGuid =
+      this.properties.superUserMode && this._selectedUserGuid
+        ? this._selectedUserGuid
+        : this._loggedInUserGuid;
 
-    // Slet cache for hver dag i ugen
+    const weekDates: string[] = [];
     for (let i = 0; i < 7; i++) {
-      const date = this._currentWeekStart.plus({ days: i }).toISODate();
-      const cacheKey = `shifts-${date}-${this._userObjectId}`;
-      storage.delete(cacheKey);
+      weekDates.push(this._currentWeekStart.plus({ days: i }).toISODate()!);
     }
+    weekDates.forEach((d) => {
+      const cacheKey = `shifts-${d}-${effectiveUserGuid}`;
+      window.sessionStorage.removeItem(cacheKey);
+    });
 
-    // Hent så frisk data
     await this._loadShiftsForWeek(this._currentWeekStart);
   }
 
@@ -176,25 +212,44 @@ export default class MyShiftsWebPart extends BaseClientSideWebPart<IMyShiftsWebP
   protected getPropertyPaneConfiguration(): IPropertyPaneConfiguration {
     const dropdownOptions: IPropertyPaneDropdownOption[] = [
       { key: 'day', text: 'Dagvisning' },
-      { key: 'week', text: 'Ugekalender' },
+      { key: 'week', text: 'Ugekalender' }
     ];
+
+    const groupFields: IPropertyPaneField<any>[] = [
+      PropertyPaneDropdown('viewMode', {
+        label:   'Visningstype',
+        options: dropdownOptions
+      }),
+      PropertyPaneToggle('superUserMode', {
+        label:   'Super User Mode',
+        onText:  'Til',
+        offText: 'Fra'
+      } as IPropertyPaneToggleProps)
+    ];
+
+    if (this.properties.superUserMode) {
+      groupFields.push(
+        PropertyPaneTextField('selectedUserId', {
+          label:       'Bruger (UPN eller GUID)',
+          placeholder: 'fx user@contoso.com eller 109996fd-2223-4e1e-a61c-8f68b6e32c58'
+        } as IPropertyPaneTextFieldProps)
+      );
+    }
+
     return {
       pages: [
         {
-          header: { description: 'Vælg visning' },
+          header: {
+            description: 'Opsæt webpart'
+          },
           groups: [
             {
-              groupName: 'Opsætning',
-              groupFields: [
-                PropertyPaneDropdown('viewMode', {
-                  label: 'Visningstype',
-                  options: dropdownOptions,
-                }),
-              ],
-            },
-          ],
-        },
-      ],
+              groupName:   'Visning & Bruger',
+              groupFields: groupFields
+            }
+          ]
+        }
+      ]
     };
   }
 }

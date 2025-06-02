@@ -1,10 +1,14 @@
 // src/webparts/myShifts/components/MyShiftsCalendar.tsx
+
 import * as React from 'react';
 import { DateTime } from 'luxon';
 import { MSGraphClientV3 } from '@microsoft/sp-http';
 import { Stack } from '@fluentui/react/lib/Stack';
 import { Text } from '@fluentui/react/lib/Text';
 import { DefaultButton } from '@fluentui/react/lib/Button';
+
+// 1) Importér print‐CSS (skal bruge “module.scss”‐suffix)
+import '../PrintOverrides.scss';
 
 import { getShiftsForDay, IShift } from '../services/ShiftsService';
 
@@ -13,8 +17,8 @@ import { getShiftsForDay, IShift } from '../services/ShiftsService';
 // ────────────────────────────────────────────────────────────────
 export interface IMyShiftsCalendarProps {
   graphClient: MSGraphClientV3;  // Graph‐klienten installeret i onInit
-  userId: string;                // Azure AD objectId (GUID)
-  tz: string;                    // IANA‐tidszone, fx "Europe/Copenhagen"
+  userId:      string;           // Azure AD objectId (GUID) eller “me”
+  tz:          string;           // IANA‐tidszone, f.eks. “Europe/Copenhagen”
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -24,7 +28,6 @@ export const MyShiftsCalendar: React.FC<IMyShiftsCalendarProps> = (props) => {
   const { graphClient, userId, tz } = props;
 
   // ─── Lokal state ────────────────────────────────────────────────
-  // 'day' holder den lokale dato, som brugeren navigerer til
   const [day, setDay]       = React.useState(DateTime.now().setZone(tz));
   const [shifts, setShifts] = React.useState<IShift[]>([]);
   const [busy, setBusy]     = React.useState<boolean>(false);
@@ -41,7 +44,6 @@ export const MyShiftsCalendar: React.FC<IMyShiftsCalendarProps> = (props) => {
         const result = await getShiftsForDay(graphClient, targetDay, userId);
         setShifts(result);
       } catch (e) {
-        // Vis evt. fejl i UI, og log den til konsollen
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);
         console.error(e);
@@ -52,82 +54,86 @@ export const MyShiftsCalendar: React.FC<IMyShiftsCalendarProps> = (props) => {
     [graphClient, userId]
   );
 
-  // ─── Kør loadShifts hele tiden, når 'day' ændres ───────────────────
+  // ─── Kør loadShifts, når 'day' ændres ─────────────────────────────
   React.useEffect(() => {
-    loadShifts(day).catch((e) => {
-      // Sikre, at eventuelle utilsigtede fejl også fanges
-      console.error('Fejl i loadShifts:', e);
-    });
+    loadShifts(day).catch((e) => console.error('Fejl i loadShifts:', e));
   }, [day, loadShifts]);
 
-  // ─── Navigation: Skift dag med pilene ─────────────────────────────
+  // ─── Navigation: skift dag med pilene ─────────────────────────────
   const navigateDay = (deltaDays: number): void => {
     setDay((current) => current.plus({ days: deltaDays }));
   };
 
-  // Formaterer ISO‐string til "HH:mm", med brugerens tidszone
+  // Formatter ISO‐string til “HH:mm”
   const formatHour = (isoString: string): string =>
     DateTime.fromISO(isoString).setZone(tz).toFormat('HH:mm');
 
   // ────────────────────────────────────────────────────────────────
   return (
-    <Stack tokens={{ childrenGap: 16 }}>
-      {/* 1) Navigation med ← og → knapper  */}
-      <Stack horizontal tokens={{ childrenGap: 12 }} verticalAlign="center">
-        <DefaultButton text="←" onClick={(): void => navigateDay(-1)} />
-        <Text variant="large">
-          {day.toLocaleString(DateTime.DATE_FULL)}
-        </Text>
-        <DefaultButton text="→" onClick={(): void => navigateDay(1)} />
-      </Stack>
+    // 2) Print wrapper: ALT, der skal printes, skal ligge i #printArea
+    <div id="printArea">
+      {/* 3) Print‐knap – ligger altid foran kalender‐UI */}
+      <div style={{ textAlign: 'right', marginBottom: '1rem' }}>
+        <DefaultButton text="Print" onClick={() => window.print()} />
+      </div>
 
-      {/* 2) Indlæs‐status eller fejlmelding */}
-      {busy && <Text>Indlæser …</Text>}
-      {error && (
-        <Text variant="small" styles={{ root: { color: 'red' } }}>
-          Fejl: {error}
-        </Text>
-      )}
+      {/* 4) Navigation + Dato‐overskrift */}
+      <Stack tokens={{ childrenGap: 16 }}>
+        <Stack horizontal tokens={{ childrenGap: 12 }} verticalAlign="center">
+          <DefaultButton text="←" onClick={() => navigateDay(-1)} />
+          <Text variant="large">
+            {day.toLocaleString(DateTime.DATE_FULL)}
+          </Text>
+          <DefaultButton text="→" onClick={() => navigateDay(1)} />
+        </Stack>
 
-      {/* 3) Ingen vagter i dag */}
-      {!busy && !error && shifts.length === 0 && (
-        <Text>Ingen vagter i dag 🎉</Text>
-      )}
+        {/* 5) Status/fejl/”Ingen vagter” */}
+        {busy && <Text>Indlæser …</Text>}
+        {error && (
+          <Text variant="small" styles={{ root: { color: 'red' } }}>
+            Fejl: {error}
+          </Text>
+        )}
+        {!busy && !error && shifts.length === 0 && (
+          <Text>Ingen vagter i dag 🎉</Text>
+        )}
 
-      {/* 4) Liste af vagter */}
-      {!busy &&
-        !error &&
-        shifts.map((s) => (
-          <Stack
-            key={s.id}
-            horizontal
-            tokens={{ childrenGap: 16 }}
-            styles={{
-              root: {
-                border: '1px solid #ddd',
-                borderRadius: 4,
-                padding: 12,
-                alignItems: 'center',
-              },
-            }}
-          >
-            {/* Tidsinterval */}
-            <Text styles={{ root: { width: 100, fontWeight: 600 } }}>
-              {formatHour(s.sharedShift.startDateTime)} – {formatHour(s.sharedShift.endDateTime)}
-            </Text>
-
-            {/* Oplysninger om team og planlægningsgruppe */}
-            <Stack>
-              <Text variant="small">
-                Team: {s.teamInfo?.displayName ?? s.teamId}
+        {/* 6) Liste af vagter */}
+        {!busy &&
+          !error &&
+          shifts.map((s) => (
+            <Stack
+              key={s.id}
+              horizontal
+              tokens={{ childrenGap: 16 }}
+              styles={{
+                root: {
+                  border:       '1px solid #ddd',
+                  borderRadius: 4,
+                  padding:      12,
+                  alignItems:   'center',
+                },
+              }}
+            >
+              {/* 6.a) Tidsinterval */}
+              <Text styles={{ root: { width: 100, fontWeight: 600 } }}>
+                {formatHour(s.sharedShift.startDateTime)} –{' '}
+                {formatHour(s.sharedShift.endDateTime)}
               </Text>
-              <Text variant="small">
-                Gruppe: {s.schedulingGroupInfo?.displayName ?? '—'}
-              </Text>
+
+              {/* 6.b) Team + planlægningsgruppe */}
+              <Stack>
+                <Text variant="small">
+                  Team: {s.teamInfo?.displayName ?? s.teamId}
+                </Text>
+                <Text variant="small">
+                  Gruppe: {s.schedulingGroupInfo?.displayName ?? '—'}
+                </Text>
+              </Stack>
             </Stack>
-          </Stack>
-        ))}
-    </Stack>
+          ))}
+      </Stack>
+    </div>
   );
 };
 

@@ -61,7 +61,7 @@
   padding: 6px 0;
   border-right: 1px solid #ddd;
   background-color: #f3f2f1;
-  z-index: 2;  /* ligger over de blå vagter, så man altid kan læse tiderne */
+  z-index: 2;  /* ligger over de farvede vagter, så man altid kan læse tiderne */
 }
 
 /* Dags‐kolonnernes overskrifter (Mon, Tue osv.) */
@@ -111,18 +111,16 @@
   border-top: 1px solid #eee;
   border-right: 1px solid #eee;
   position: relative;  /* container for de absolut‐placerede .shiftBlock */
+  overflow: hidden;    /* sikrer, at vagt‐bokse ikke “rager ud” af dag‐containeren */
 }
 
 /* ------------------------------------------------------------ */
 /* 4) SHIFTBLOCK – selve vagt‐boksen                              */
 /* ------------------------------------------------------------ */
+/* Bemærk: width og left sættes inline fra React via style‐props */
+/* Klassen sætter kun border, skygge, tekst‐stil osv.            */
 .shiftBlock {
   position: absolute;
-  /* Bredden begrænser vi til max 90% af dag‐cellen, så overlappende vagter kan få sit eget “spor”. */
-  width: calc(100% * 0.9);
-  /* Flyt boksens venstre side 5% inde i dag‐cellen – så man kan se overlap. */
-  left: calc(100% * 0.05);
-  background-color: rgba(0, 120, 212, 0.6);
   border: 1px solid #005a9e;
   border-radius: 2px;
   padding: 2px 6px;
@@ -133,14 +131,29 @@
   justify-content: flex-start;
   color: #fff;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  z-index: 1;  /* så den ligger under .hourLabel/.dayHeader, men over selve “grid‐baggrunden” */
+  z-index: 1; /* ligger under .hourLabel/.dayHeader, men over selve “grid‐baggrunden” */
 }
 
-/* Hvis du har flere vagter, der overlapper i tid, kan du i din TSX‐logic give en anden “left” for anden vagt (fx left: calc(100% * 0.15)) */
-/* Eller en ekstra klasse, fx `.shiftBlock.shiftOverlap` med f.eks.: left: calc(100% * 0.15); width: calc(100% * 0.8); */
+/* ------------------------------------------------------------ */
+/* 5) SHIFT OVERLAP – når flere vagter overlapper horisontalt     */
+/* ------------------------------------------------------------ */
+.shiftOverlap {
+  position: absolute;
+  border: 1px solid #005a9e;
+  border-radius: 2px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
 
 /* ------------------------------------------------------------ */
-/* 5) INDHOLD I BLÅ BOKS – vagtinfo                               */
+/* 6) INDHOLD I FARVET BOKS – vagtinfo                            */
 /* ------------------------------------------------------------ */
 .shiftInfo {
   display: flex;
@@ -160,7 +173,100 @@
 }
 
 /* ------------------------------------------------------------ */
-/* 6) LOADING / STATUS / ERROR – hvis du returnerer tidligt        */
+/* 7) OVERLAP‐IKON – advarselsikon, når isOverlap = true           */
+/* ------------------------------------------------------------ */
+.overlapIcon {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 0.65rem;
+  color: #d13438;
+  z-index: 3; /* Ligger øverst i .shiftBlock eller .shiftOverlap */
+}
+
+/* ------------------------------------------------------------ */
+/* 8) FARVE‐TEMAER – bring shift.sharedShift.theme til live       */
+/* ------------------------------------------------------------ */
+
+/* Hvis Graph returnerer "white" */
+.themeWhite {
+  background-color: #f3f3f3;
+  border-color:     #e1e1e1;
+}
+
+/* Hvis Graph returnerer "blue" */
+.themeBlue {
+  background-color: #0078d4;
+  border-color:     #005a9e;
+}
+
+/* Hvis Graph returnerer "green" */
+.themeGreen {
+  background-color: #107c10;
+  border-color:     #0b4e0b;
+}
+
+/* Hvis Graph returnerer "purple" */
+.themePurple {
+  background-color: #5c2d91;
+  border-color:     #471f6f;
+}
+
+/* Hvis Graph returnerer "pink" */
+.themePink {
+  background-color: #e3008c;
+  border-color:     #a1006b;
+}
+
+/* Hvis Graph returnerer "yellow" */
+.themeYellow {
+  background-color: #ffb900;
+  border-color:     #c19c00;
+}
+
+/* Hvis Graph returnerer "gray" */
+.themeGray {
+  background-color: #8a8886;
+  border-color:     #605e5c;
+}
+
+/* Hvis Graph returnerer "darkBlue" */
+.themeDarkBlue {
+  background-color: #004c87;
+  border-color:     #003762;
+}
+
+/* Hvis Graph returnerer "darkGreen" */
+.themeDarkGreen {
+  background-color: #0b6a0b;
+  border-color:     #084d08;
+}
+
+/* Hvis Graph returnerer "darkPink" */
+.themeDarkPink {
+  background-color: #68217a;
+  border-color:     #4e165c;
+}
+
+/* Hvis Graph returnerer "darkPurple" */
+.themeDarkPurple {
+  background-color: #5b06ba;
+  border-color:     #42049a;
+}
+
+/* Hvis Graph returnerer "darkYellow" */
+.themeDarkYellow {
+  background-color: #c19c00;
+  border-color:     #8f6e00;
+}
+
+/* Hvis Graph returnerer andre tema-navne, fx “orange” eller “teal”, kan du tilføje: */
+/* .themeOrange     { background-color: #d83b01; } */
+/* .themeTeal       { background-color: #008272; } */
+/* … og så videre præcis som Graph returnerer dem. */
+
+/* ------------------------------------------------------------ */
+/* 9) LOADING / STATUS / ERROR – hvis du returnerer tidligt        */
 /* ------------------------------------------------------------ */
 .status {
   padding: 16px;
@@ -174,18 +280,4 @@
   color: #d13438;
   font-weight: 600;
   text-align: center;
-}
-.shiftOverlap {
-  /* Når en vagt overlapper en anden, giver vi f.eks. en lidt smallere bredde */
-  width: calc(100% * 0.75);
-  left: calc(100% * 0.125);
-  background-color: rgba(0, 120, 212, 0.8);
-}
-.overlapIcon {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  font-size: 0.65rem;
-  color: #d13438;
-  z-index: 3; /* Ligger øverst inde i .shiftBlock */
 }

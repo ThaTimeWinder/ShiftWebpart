@@ -14,6 +14,7 @@ import {
 } from '@microsoft/sp-property-pane';
 import { MSGraphClientV3 } from '@microsoft/sp-http';
 import { DateTime } from 'luxon';
+import { PnPClientStorage } from '@pnp/core'; // ← Importér PnPClientStorage
 
 import MyShiftsCalendar from './components/MyShiftsCalendar';
 import WeekCalendar, {
@@ -21,7 +22,7 @@ import WeekCalendar, {
   IWeekCalendarProps,
 } from './components/WeekCalendar';
 
-// Importér jeres “raw” service‐IShift, som indeholder `sharedShift.startDateTime` osv.
+// Rå‐interface fra jeres service
 import { IShift as IServiceShift, getShiftsForDay } from './services/ShiftsService';
 
 export interface IMyShiftsWebPartProps {
@@ -32,66 +33,55 @@ export default class MyShiftsWebPart extends BaseClientSideWebPart<IMyShiftsWebP
   private _graphClient!: MSGraphClientV3;
   private _userObjectId!: string;
 
-  /** Den aktuelle uges start på mandags midnat (Locale‐tid). */
+  /** Ugens start på mandag kl. 00:00 (lokal tid) */
   private _currentWeekStart: DateTime = DateTime.local()
     .startOf('week')
-    .plus({ days: 1 }); // Luxon: startOf('week') = søndag, så +1 = mandag.
+    .plus({ days: 1 });
 
-  /** Liste af mapperede vagter (til WeekCalendar) i den uge, vi skal vise */
+  /** Liste med alle mapperede vagter til WeekCalendar */
   private _shiftsForWeek: IComponentShift[] = [];
 
-  public async onInit(): Promise<void> {
-    // 1) Hent MSGraphClientV3 fra SPFx‐konteksten
-    this._graphClient = await this.context.msGraphClientFactory.getClient('3');
-    // 2) Hent Azure AD objectId fra konteksten
-    this._userObjectId = this.context.pageContext.aadInfo.userId!;
+  /** Om vi indlæser vagter i øjeblikket */
+  private _isLoading: boolean = false;
 
-    // 3) Hent første uges vagter via vores private loader‐funktion
+  public async onInit(): Promise<void> {
+    this._graphClient = await this.context.msGraphClientFactory.getClient('3');
+    this._userObjectId = this.context.pageContext.aadInfo.userId!;
     await this._loadShiftsForWeek(this._currentWeekStart);
   }
 
   /**
-   * Henter vagter for hele ugen [mandag .. søndag] i to trin:
-   *  A) Kalder getShiftsForDay(...) for hver enkelt dag
-   *  B) Mapper service‐IShift (med 'sharedShift.startDateTime') til komponent‐IShift,
-   *     hvor startTime/endTime er Luxon‐DateTime, og teamName hentes fra teamInfo eller schedulingGroupInfo.
+   * Henter vagter for uge [mandag..søndag]:
+   *   1) Kalder getShiftsForDay for hver dag
+   *   2) Mapper til komponent‐IShift
    */
   private async _loadShiftsForWeek(weekStart: DateTime): Promise<void> {
-    // Midlertidigt array til “rå” servicevagter
-    const allServiceShifts: IServiceShift[] = [];
+    // Marker “loading” og re-render straks
+    this._isLoading = true;
+    this.render();
 
-    // 1) Løb gennem dagene mandag (i = 0) → søndag (i = 6)
+    const allServiceShifts: IServiceShift[] = [];
     for (let i = 0; i < 7; i++) {
       const singleDay: DateTime = weekStart.plus({ days: i });
       try {
-        // Hent alle vagter, der overlapper “singleDay” via jeres service‐funktion
         const shiftsForDay: IServiceShift[] = await getShiftsForDay(
           this._graphClient,
           singleDay,
           this._userObjectId
         );
-
-        // Tilføj dem alle til det kumulative array
         allServiceShifts.push(...shiftsForDay);
       } catch (err) {
         console.error(`Fejl ved hent af vagter for dag ${singleDay.toISODate()}:`, err);
       }
     }
 
-    // 2) Mapper fra “service‐IShift” til “komponent‐IShift”:
-    //    - Fra sharedShift.startDateTime (UTC ISO) → lokale DateTime
-    //    - Fra sharedShift.endDateTime (UTC ISO) → lokale DateTime
-    //    - teamName: Brug schedulingGroupInfo.displayName eller teamInfo.displayName
-    //    - isOverlap: sæt false her; WeekCalendar kan alligevel beregne overlap (eller I kan sætte det i tast)
     const mapped: IComponentShift[] = allServiceShifts.map((srv) => {
       const startUtc = DateTime.fromISO(srv.sharedShift.startDateTime, { zone: 'utc' });
-      const endUtc = DateTime.fromISO(srv.sharedShift.endDateTime, { zone: 'utc' });
+      const endUtc   = DateTime.fromISO(srv.sharedShift.endDateTime,   { zone: 'utc' });
+      const tz       = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const startLocal = startUtc.setZone(tz);
+      const endLocal   = endUtc.setZone(tz);
 
-      // Konverter til brugerens lokale tidszone
-      const startLocal = startUtc.setZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
-      const endLocal = endUtc.setZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
-
-      // Vælg team‐navn: hvis schedulingGroupInfo findes, brug displayName, ellers teamInfo.displayName
       let teamName = 'Ukendt team';
       if (srv.schedulingGroupInfo && srv.schedulingGroupInfo.displayName) {
         teamName = srv.schedulingGroupInfo.displayName;
@@ -99,49 +89,45 @@ export default class MyShiftsWebPart extends BaseClientSideWebPart<IMyShiftsWebP
         teamName = srv.teamInfo.displayName;
       }
 
-      // TODO: Hvis I vil markere overlappende vagter, kan I detektere overlap her og sætte isOverlap = true.
-      //       Men hvis WeekCalendar selv kan vise overlap (ved at bruge shiftOverlap‐klasse),
-      //       kan I blot sætte isOverlap=false her og overlappet håndtere i WeekCalendar.
-      const isOverlap = false;
+      // Hent Graph‐temaet (cast til any, da feltet ikke findes i IServiceShift-interface)
+      const rawTheme = (srv.sharedShift as any).theme;
+      const theme    = typeof rawTheme === 'string' ? rawTheme : 'white';
 
       return {
-        startTime: startLocal,
-        endTime: endLocal,
-        teamName: teamName,
-        isOverlap: isOverlap,
+        startTime:  startLocal,
+        endTime:    endLocal,
+        teamName:   teamName,
+        isOverlap:  false,
+        theme:      theme,
       } as IComponentShift;
     });
 
-    // 3) Gem de mapperede vagter i feltet _shiftsForWeek
     this._shiftsForWeek = mapped;
-
-    // 4) Trigger re-render af webpart, så WeekCalendar får opdateret data
+    this._isLoading = false;
     this.render();
   }
 
   public render(): void {
-    // De tre “dagvisnings‐props” (sharedCalProps) som MyShiftsCalendar bruger
     const sharedCalProps = {
       graphClient: this._graphClient,
-      userId: this._userObjectId,
-      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      userId:       this._userObjectId,
+      tz:           Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
 
     let element: React.ReactElement;
 
     if (this.properties.viewMode === 'week') {
-      // Byg de props, WeekCalendar kræver i sin interface:
       const weekProps: IWeekCalendarProps = {
-        weekStart: this._currentWeekStart,
-        shifts: this._shiftsForWeek,
-        allEmpty: this._shiftsForWeek.length === 0,
+        weekStart:      this._currentWeekStart,
+        shifts:         this._shiftsForWeek,
+        allEmpty:       this._shiftsForWeek.length === 0 && !this._isLoading,
+        isLoading:      this._isLoading,
         goPreviousWeek: this._goPreviousWeek.bind(this),
-        goNextWeek: this._goNextWeek.bind(this),
+        goNextWeek:     this._goNextWeek.bind(this),
+        onRefresh:      this._refreshCurrentWeek.bind(this), // Nyt callback
       };
-
       element = <WeekCalendar {...weekProps} />;
     } else {
-      // Dagvisning: send blot de sharedCalProps til MyShiftsCalendar
       element = <MyShiftsCalendar {...sharedCalProps} />;
     }
 
@@ -152,19 +138,34 @@ export default class MyShiftsWebPart extends BaseClientSideWebPart<IMyShiftsWebP
     ReactDom.unmountComponentAtNode(this.domElement);
   }
 
-  /**
-   * “Forrige uge”-knap: flyt 7 dage tilbage, hent data til den nye uge og rerender
-   */
+  /** Gå 7 dage tilbage + hent data for den uge */
   private async _goPreviousWeek(): Promise<void> {
     this._currentWeekStart = this._currentWeekStart.minus({ days: 7 });
     await this._loadShiftsForWeek(this._currentWeekStart);
   }
 
-  /**
-   * “Næste uge”-knap: flyt 7 dage frem, hent data til den nye uge og rerender
-   */
+  /** Gå 7 dage frem + hent data for den uge */
   private async _goNextWeek(): Promise<void> {
     this._currentWeekStart = this._currentWeekStart.plus({ days: 7 });
+    await this._loadShiftsForWeek(this._currentWeekStart);
+  }
+
+  /**
+   * Genindlæs data for den nuværende uge (kaldes fra “Opdater data”‐knappen).
+   * Først sletter vi cache‐nøglerne for alle 7 dage i ugen, så getShiftsForDay
+   * henter frisk data fra Graph i stedet for sessionStorage.
+   */
+  private async _refreshCurrentWeek(): Promise<void> {
+    const storage = new PnPClientStorage().session;
+
+    // Slet cache for hver dag i ugen
+    for (let i = 0; i < 7; i++) {
+      const date = this._currentWeekStart.plus({ days: i }).toISODate();
+      const cacheKey = `shifts-${date}-${this._userObjectId}`;
+      storage.delete(cacheKey);
+    }
+
+    // Hent så frisk data
     await this._loadShiftsForWeek(this._currentWeekStart);
   }
 
@@ -177,13 +178,10 @@ export default class MyShiftsWebPart extends BaseClientSideWebPart<IMyShiftsWebP
       { key: 'day', text: 'Dagvisning' },
       { key: 'week', text: 'Ugekalender' },
     ];
-
     return {
       pages: [
         {
-          header: {
-            description: 'Vælg visning',
-          },
+          header: { description: 'Vælg visning' },
           groups: [
             {
               groupName: 'Opsætning',
